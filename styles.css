@@ -26,6 +26,12 @@ button:hover {
   background-color: #3367d6;
 }
 
+button:disabled {
+  background-color: #bdbdbd !important;
+  cursor: not-allowed !important;
+  opacity: 0.7;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

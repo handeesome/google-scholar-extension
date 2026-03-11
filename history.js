@@ -26,7 +26,11 @@ function setLoading(button, loading) {
 /* ---------------- LOGIN STATUS ---------------- */
 
 async function checkLoginStatus() {
-  const data = await chrome.storage.local.get(["notionToken", "notionUser"]);
+  const data = await chrome.storage.local.get([
+    "notionToken",
+    "notionUser",
+    "databaseId",
+  ]);
 
   if (data.notionToken) {
     loginStatus.textContent = "Logged in to Notion";
@@ -34,17 +38,50 @@ async function checkLoginStatus() {
 
     loginBtn.style.display = "none";
     logoutBtn.style.display = "inline-block";
+    document.getElementById("setDbBtn").style.display = "inline-block";
 
-    syncBtn.disabled = false;
+    // Only enable sync if database ID is also set
+    syncBtn.disabled = !data.databaseId;
+
+    if (!data.databaseId) {
+      promptDatabaseId();
+    }
   } else {
     loginStatus.textContent = "Not logged in";
     loginStatus.className = "logged-out";
 
     loginBtn.style.display = "inline-block";
     logoutBtn.style.display = "none";
+    document.getElementById("setDbBtn").style.display = "none";
 
     syncBtn.disabled = true;
   }
+}
+
+function promptDatabaseId() {
+  const id = prompt(
+    "Welcome! Please enter your Notion Database ID to start syncing.\n\n" +
+      "You can find it in your Notion database URL:\n" +
+      "notion.so/YOUR_NAME/[DATABASE_ID]?v=...\n\n" +
+      "It\'s the 32-character string before the \'?v=\'",
+  );
+
+  if (!id || !id.trim()) return;
+
+  const cleaned = id.trim().replace(/-/g, "");
+
+  if (cleaned.length !== 32) {
+    alert(
+      "That doesn\'t look like a valid Database ID (should be 32 characters). Please try again.",
+    );
+    promptDatabaseId();
+    return;
+  }
+
+  chrome.storage.local.set({ databaseId: cleaned }, () => {
+    syncBtn.disabled = false;
+    alert("Database ID saved! You\'re ready to sync.");
+  });
 }
 
 /* ---------------- LAST SYNC ---------------- */
@@ -74,9 +111,35 @@ loginBtn.addEventListener("click", () => {
 /* ---------------- LOGOUT BUTTON ---------------- */
 
 logoutBtn.addEventListener("click", async () => {
-  await chrome.storage.local.remove(["notionToken", "notionUser"]);
+  await chrome.storage.local.remove([
+    "notionToken",
+    "notionUser",
+    "databaseId",
+  ]);
 
   checkLoginStatus();
+});
+
+/* ---------------- SET DATABASE ID BUTTON ---------------- */
+
+document.getElementById("setDbBtn").addEventListener("click", async () => {
+  const confirmChange = confirm(
+    "To change your database, you need to log in again and enter a new Database ID.\n\nProceed?",
+  );
+  if (!confirmChange) return;
+
+  // Clear token + database so login flow starts fresh
+  await chrome.storage.local.remove([
+    "notionToken",
+    "notionUser",
+    "databaseId",
+    "lastSyncTime",
+  ]);
+  await checkLoginStatus();
+
+  // Trigger login
+  setLoading(loginBtn, true);
+  chrome.runtime.sendMessage({ action: "login" });
 });
 
 /* ---------------- SYNC BUTTON ---------------- */
@@ -101,12 +164,23 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     setLoading(loginBtn, false);
 
     await checkLoginStatus();
+    // checkLoginStatus will call promptDatabaseId() if no databaseId is set
   }
 
   if (msg.action === "loginFailed") {
     setLoading(loginBtn, false);
 
     alert("Notion login failed");
+  }
+
+  if (msg.action === "noDatabaseId") {
+    setLoading(syncBtn, false);
+    promptDatabaseId();
+  }
+
+  if (msg.action === "syncError") {
+    setLoading(syncBtn, false);
+    alert("Sync failed: " + msg.message);
   }
 
   if (msg.action === "confirmImport") {

@@ -1,7 +1,6 @@
 const CLIENT_ID = "30fd872b-594c-81ed-90e7-0037c6455a92";
-const CLIENT_SECRET = "REMOVED";
+const WORKER_URL = "https://notion-auth.ducenhandee.workers.dev";
 
-const DATABASE_ID = "30f1ed958a9980d3ab76cce757b541d4";
 const NOTION_VERSION = "2022-06-28";
 
 let pendingImport = [];
@@ -11,6 +10,8 @@ let syncQueue = [];
 let queueRunning = false;
 
 let schemaChecked = false;
+let titlePropertyName = "Name";
+let lastKnownDatabaseId = null;
 
 /* ---------------- MESSAGE LISTENER ---------------- */
 
@@ -29,22 +30,49 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 /* ---------------- DATABASE SCHEMA CHECK ---------------- */
 
-async function ensureDatabaseSchema(token) {
+async function ensureDatabaseSchema(token, databaseId) {
+  // Reset if database has changed
+  if (databaseId !== lastKnownDatabaseId) {
+    schemaChecked = false;
+    titlePropertyName = "Name";
+  }
   if (schemaChecked) return;
 
-  const res = await fetch(
-    `https://api.notion.com/v1/databases/${DATABASE_ID}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Notion-Version": NOTION_VERSION,
-      },
+  const res = await fetch(`https://api.notion.com/v1/databases/${databaseId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Notion-Version": NOTION_VERSION,
     },
-  );
+  });
 
   const db = await res.json();
 
+  if (!res.ok || !db.properties) {
+    console.error(
+      "Failed to fetch database schema:",
+      JSON.stringify(db, null, 2),
+    );
+    schemaChecked = false;
+    const msg =
+      db.status === 404
+        ? "Database not found. Please check your Database ID."
+        : db.status === 403
+          ? "Access denied. Share the Notion database with your integration first."
+          : `Database error: ${db.message || "Unknown error"}`;
+    chrome.runtime.sendMessage({ action: "syncError", message: msg });
+    throw new Error("Database fetch failed");
+  }
+
   const existing = db.properties;
+
+  // Find the title property — name varies by Notion language (e.g. "名称", "标题")
+  let existingTitleKey = null;
+  for (const [key, val] of Object.entries(existing)) {
+    if (val.type === "title") {
+      existingTitleKey = key;
+      break;
+    }
+  }
 
   const required = {
     URL: { url: {} },
@@ -54,8 +82,21 @@ async function ensureDatabaseSchema(token) {
     "Last Visited": { date: {} },
   };
 
-  const missing = {};
+  // Use the detected title key directly — no rename needed
+  if (!existingTitleKey) {
+    console.error(
+      "Could not find title property in database. Properties found:",
+      Object.keys(existing),
+    );
+  }
+  titlePropertyName = existingTitleKey || Object.keys(existing)[0];
+  console.log(
+    `Using title property: "${titlePropertyName}". All properties:`,
+    Object.keys(existing),
+  );
 
+  // Add any missing non-title properties
+  const missing = {};
   for (const key in required) {
     if (!existing[key]) {
       missing[key] = required[key];
@@ -63,10 +104,8 @@ async function ensureDatabaseSchema(token) {
   }
 
   if (Object.keys(missing).length > 0) {
-    console.log("Adding missing Notion properties:", missing);
-
     const updateRes = await fetch(
-      `https://api.notion.com/v1/databases/${DATABASE_ID}`,
+      `https://api.notion.com/v1/databases/${databaseId}`,
       {
         method: "PATCH",
         headers: {
@@ -74,19 +113,23 @@ async function ensureDatabaseSchema(token) {
           "Content-Type": "application/json",
           "Notion-Version": NOTION_VERSION,
         },
-        body: JSON.stringify({
-          properties: missing,
-        }),
+        body: JSON.stringify({ properties: missing }),
       },
     );
 
     const updateData = await updateRes.json();
 
     if (!updateRes.ok) {
-      console.error("Schema update failed", updateData);
+      console.error(
+        "Schema update failed:",
+        JSON.stringify(updateData, null, 2),
+      );
+    } else {
+      console.log("Missing columns added successfully");
     }
   }
 
+  lastKnownDatabaseId = databaseId;
   schemaChecked = true;
 }
 
@@ -121,26 +164,37 @@ async function processQueue() {
 /* ---------------- AUTO SYNC ---------------- */
 
 async function autoSync(paper) {
-  const { notionToken } = await chrome.storage.local.get("notionToken");
+  const { notionToken, databaseId } = await chrome.storage.local.get([
+    "notionToken",
+    "databaseId",
+  ]);
 
-  if (!notionToken || !paper) return;
+  if (!notionToken || !paper || !databaseId) return;
 
-  await ensureDatabaseSchema(notionToken);
+  await ensureDatabaseSchema(notionToken, databaseId);
 
   try {
     if (!paper.notionPageId) {
-      const id = await createPage(notionToken, paper);
-
+      const id = await createPage(notionToken, databaseId, paper);
       const storage = await chrome.storage.local.get("visitedPapers");
       const map = storage.visitedPapers || {};
-
       if (map[paper.url]) {
         map[paper.url].notionPageId = id;
-
         await chrome.storage.local.set({ visitedPapers: map });
       }
     } else {
-      await updatePage(notionToken, paper);
+      const updated = await updatePage(notionToken, paper);
+      if (!updated) {
+        // Stale/archived page — clear ID and recreate
+        const storage = await chrome.storage.local.get("visitedPapers");
+        const map = storage.visitedPapers || {};
+        if (map[paper.url]) {
+          map[paper.url].notionPageId = null;
+          const id = await createPage(notionToken, databaseId, map[paper.url]);
+          if (id) map[paper.url].notionPageId = id;
+          await chrome.storage.local.set({ visitedPapers: map });
+        }
+      }
     }
 
     // Update lastSyncTime so manual sync doesn't re-export auto-synced papers
@@ -231,24 +285,12 @@ async function loginToNotion() {
         return;
       }
 
-      const basicAuth = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
-
-      const tokenResponse = await fetch(
-        "https://api.notion.com/v1/oauth/token",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Basic ${basicAuth}`,
-            "Content-Type": "application/json",
-            "Notion-Version": NOTION_VERSION,
-          },
-          body: JSON.stringify({
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: redirectUri,
-          }),
-        },
-      );
+      // Exchange code via Cloudflare Worker (keeps Client Secret off the client)
+      const tokenResponse = await fetch(WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      });
 
       const tokenData = await tokenResponse.json();
       const token = tokenData.access_token;
@@ -279,8 +321,8 @@ async function loginToNotion() {
 
 /* ---------------- DATABASE QUERY ---------------- */
 
-async function queryDatabaseIncremental(token) {
-  await ensureDatabaseSchema(token);
+async function queryDatabaseIncremental(token, databaseId) {
+  await ensureDatabaseSchema(token, databaseId);
 
   const { lastSyncTime } = await chrome.storage.local.get("lastSyncTime");
 
@@ -298,7 +340,7 @@ async function queryDatabaseIncremental(token) {
     }
 
     const res = await fetch(
-      `https://api.notion.com/v1/databases/${DATABASE_ID}/query`,
+      `https://api.notion.com/v1/databases/${databaseId}/query`,
       {
         method: "POST",
         headers: {
@@ -330,7 +372,7 @@ function notionPageToPaper(page) {
   return {
     notionPageId: page.id,
     url: props.URL?.url || "",
-    title: props.Name?.title?.[0]?.plain_text || "",
+    title: props[titlePropertyName]?.title?.[0]?.plain_text || "",
     authorInfo: props["Author / Source"]?.rich_text?.[0]?.plain_text || "",
     visitCount: props["Visit Count"]?.number || 1,
     firstVisited: props["First Visited"]?.date?.start || null,
@@ -340,7 +382,19 @@ function notionPageToPaper(page) {
 
 /* ---------------- CREATE PAGE ---------------- */
 
-async function createPage(token, paper) {
+async function createPage(token, databaseId, paper) {
+  // Safety: if titlePropertyName is stale, force schema re-check
+  if (!titlePropertyName || titlePropertyName === "Name") {
+    schemaChecked = false;
+    await ensureDatabaseSchema(token, databaseId);
+  }
+
+  const now = new Date().toISOString();
+  const title = paper.title?.trim() || "(No title)";
+  const firstVisited = paper.firstVisited || now;
+  const lastVisited = paper.lastVisited || now;
+  const visitCount = paper.visitCount || 1;
+
   const res = await fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
@@ -349,18 +403,18 @@ async function createPage(token, paper) {
       "Notion-Version": NOTION_VERSION,
     },
     body: JSON.stringify({
-      parent: { database_id: DATABASE_ID },
+      parent: { database_id: databaseId },
       properties: {
-        Name: {
-          title: [{ text: { content: paper.title } }],
+        [titlePropertyName]: {
+          title: [{ text: { content: title } }],
         },
         URL: { url: paper.url },
         "Author / Source": {
           rich_text: [{ text: { content: paper.authorInfo || "" } }],
         },
-        "Visit Count": { number: paper.visitCount },
-        "First Visited": { date: { start: paper.firstVisited } },
-        "Last Visited": { date: { start: paper.lastVisited } },
+        "Visit Count": { number: visitCount },
+        "First Visited": { date: { start: firstVisited } },
+        "Last Visited": { date: { start: lastVisited } },
       },
     }),
   });
@@ -368,7 +422,8 @@ async function createPage(token, paper) {
   const data = await res.json();
 
   if (!res.ok) {
-    console.error("Notion create error", data);
+    console.error("Notion create error:", JSON.stringify(data, null, 2));
+    console.error("Paper that failed:", JSON.stringify(paper, null, 2));
     return null;
   }
 
@@ -378,6 +433,8 @@ async function createPage(token, paper) {
 /* ---------------- UPDATE PAGE ---------------- */
 
 async function updatePage(token, paper) {
+  const now = new Date().toISOString();
+
   const res = await fetch(
     `https://api.notion.com/v1/pages/${paper.notionPageId}`,
     {
@@ -389,16 +446,20 @@ async function updatePage(token, paper) {
       },
       body: JSON.stringify({
         properties: {
-          "Visit Count": { number: paper.visitCount },
-          "Last Visited": { date: { start: paper.lastVisited } },
+          "Visit Count": { number: paper.visitCount || 1 },
+          "Last Visited": { date: { start: paper.lastVisited || now } },
         },
       }),
     },
   );
 
   if (!res.ok) {
-    console.error("Notion update failed", await res.json());
+    const data = await res.json();
+    console.error("Notion update failed:", JSON.stringify(data, null, 2));
+    return false;
   }
+
+  return true;
 }
 
 /* ---------------- BIDIRECTIONAL SYNC ---------------- */
@@ -408,6 +469,7 @@ async function bidirectionalSync(localCount) {
     "notionToken",
     "visitedPapers",
     "lastSyncTime",
+    "databaseId",
   ]);
 
   const token = storage.notionToken;
@@ -422,19 +484,28 @@ async function bidirectionalSync(localCount) {
     return;
   }
 
-  await ensureDatabaseSchema(token);
+  const databaseId = storage.databaseId;
+
+  if (!databaseId) {
+    chrome.runtime.sendMessage({ action: "noDatabaseId" });
+    return;
+  }
+
+  await ensureDatabaseSchema(token, databaseId);
 
   const lastSyncTime = storage.lastSyncTime;
   const localMap = storage.visitedPapers || {};
 
-  const notionPages = await queryDatabaseIncremental(token);
+  const notionPages = await queryDatabaseIncremental(token, databaseId);
   const remotePapers = notionPages.map(notionPageToPaper);
 
   const localUrls = new Set(Object.keys(localMap));
 
   let exported = 0;
 
-  for (const paper of Object.values(localMap)) {
+  for (const url of Object.keys(localMap)) {
+    const paper = localMap[url];
+
     const changed =
       !lastSyncTime ||
       (paper.lastVisited &&
@@ -443,13 +514,16 @@ async function bidirectionalSync(localCount) {
     if (!changed) continue;
 
     if (paper.notionPageId) {
-      await updatePage(token, paper);
-    } else {
-      const pageId = await createPage(token, paper);
-
-      if (pageId) {
-        paper.notionPageId = pageId;
+      const updated = await updatePage(token, paper);
+      if (!updated) {
+        // Stale/archived page from old database — clear ID and recreate
+        localMap[url].notionPageId = null;
+        const pageId = await createPage(token, databaseId, localMap[url]);
+        if (pageId) localMap[url].notionPageId = pageId;
       }
+    } else {
+      const pageId = await createPage(token, databaseId, paper);
+      if (pageId) localMap[url].notionPageId = pageId;
     }
 
     exported++;

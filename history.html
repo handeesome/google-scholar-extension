@@ -13,13 +13,6 @@
         margin-bottom: 12px;
       }
 
-      #avatar {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        display: none;
-      }
-
       #loginStatus {
         font-weight: bold;
       }
@@ -44,12 +37,6 @@
           transform: rotate(360deg);
         }
       }
-
-      button:disabled {
-        background-color: #bdbdbd;
-        cursor: not-allowed;
-        opacity: 0.7;
-      }
     </style>
   </head>
 
@@ -60,7 +47,8 @@
       <span id="loginStatus" class="logged-out">Not logged in</span>
       <button id="loginBtn">Login</button>
       <button id="logoutBtn">Logout</button>
-      <button id="syncBtn">Sync</button>
+      <button id="syncBtn" disabled>Sync</button>
+      <button id="setDbBtn" style="display: none">Change Database</button>
 
       <span id="lastSync">Last Sync: Never</span>
     </div>
