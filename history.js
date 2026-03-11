@@ -1,4 +1,5 @@
 const loginStatus = document.getElementById("loginStatus");
+const avatar = document.getElementById("avatar");
 
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
@@ -122,24 +123,8 @@ logoutBtn.addEventListener("click", async () => {
 
 /* ---------------- SET DATABASE ID BUTTON ---------------- */
 
-document.getElementById("setDbBtn").addEventListener("click", async () => {
-  const confirmChange = confirm(
-    "To change your database, you need to log in again and enter a new Database ID.\n\nProceed?",
-  );
-  if (!confirmChange) return;
-
-  // Clear token + database so login flow starts fresh
-  await chrome.storage.local.remove([
-    "notionToken",
-    "notionUser",
-    "databaseId",
-    "lastSyncTime",
-  ]);
-  await checkLoginStatus();
-
-  // Trigger login
-  setLoading(loginBtn, true);
-  chrome.runtime.sendMessage({ action: "login" });
+document.getElementById("setDbBtn").addEventListener("click", () => {
+  promptDatabaseId();
 });
 
 /* ---------------- SYNC BUTTON ---------------- */
@@ -164,7 +149,6 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     setLoading(loginBtn, false);
 
     await checkLoginStatus();
-    // checkLoginStatus will call promptDatabaseId() if no databaseId is set
   }
 
   if (msg.action === "loginFailed") {
@@ -176,11 +160,6 @@ chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.action === "noDatabaseId") {
     setLoading(syncBtn, false);
     promptDatabaseId();
-  }
-
-  if (msg.action === "syncError") {
-    setLoading(syncBtn, false);
-    alert("Sync failed: " + msg.message);
   }
 
   if (msg.action === "confirmImport") {
@@ -341,6 +320,54 @@ document.addEventListener("click", (event) => {
     chrome.storage.local.set({ visitedPapers: map }, loadHistory);
   });
 });
+
+/* ---------------- TUTORIAL ---------------- */
+
+(function () {
+  const overlay = document.getElementById("tutorialOverlay");
+  const slides = document.querySelectorAll(".tutorial-slide");
+  const dots = document.querySelectorAll(".dot");
+  const prevBtn = document.getElementById("tutorialPrev");
+  const nextBtn = document.getElementById("tutorialNext");
+  let current = 1;
+  const total = slides.length;
+
+  function goTo(n) {
+    slides[current - 1].classList.remove("active");
+    dots[current - 1].classList.remove("active");
+    current = n;
+    slides[current - 1].classList.add("active");
+    dots[current - 1].classList.add("active");
+    prevBtn.disabled = current === 1;
+    nextBtn.textContent = current === total ? "Done ✓" : "Next →";
+  }
+
+  document.getElementById("tutorialBtn").addEventListener("click", () => {
+    goTo(1);
+    overlay.classList.add("open");
+  });
+
+  document.getElementById("tutorialClose").addEventListener("click", () => {
+    overlay.classList.remove("open");
+  });
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.classList.remove("open");
+  });
+
+  prevBtn.addEventListener("click", () => {
+    if (current > 1) goTo(current - 1);
+  });
+
+  nextBtn.addEventListener("click", () => {
+    if (current < total) goTo(current + 1);
+    else overlay.classList.remove("open");
+  });
+
+  dots.forEach((dot) => {
+    dot.addEventListener("click", () => goTo(parseInt(dot.dataset.index)));
+  });
+})();
 
 /* ---------------- INIT ---------------- */
 
