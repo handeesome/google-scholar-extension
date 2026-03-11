@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scholar Tracker</title>
+
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        width: 300px;
+        padding: 14px;
+        background: #fafafa;
+      }
+
+      h2 {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+
+      .card {
+        background: white;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+      }
+
+      .stat-number {
+        font-size: 22px;
+        font-weight: bold;
+        margin-top: 4px;
+      }
+
+      .label {
+        font-size: 12px;
+        color: #666;
+      }
+
+      #lastPaperTitle {
+        font-weight: bold;
+        font-size: 14px;
+      }
+
+      #lastPaperTime {
+        font-size: 12px;
+        color: #777;
+        margin-top: 4px;
+      }
+
+      button {
+        width: 100%;
+        padding: 10px;
+        margin-top: 6px;
+        border-radius: 6px;
+        border: none;
+        background: #4285f4;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #2f6fe0;
+      }
+
+      #credits {
+        text-align: center;
+        margin-top: 12px;
+        font-size: 11px;
+        color: #999;
+      }
+      .clickable {
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .clickable:hover {
+        background: #f2f6ff;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>💡Scholar Tracker</h2>
+
+    <div class="card">
+      <div class="label">Papers Visited</div>
+      <div id="paperCount" class="stat-number">0</div>
+    </div>
+
+    <div class="card clickable" id="lastPaperCard">
+      <div class="label">Last Viewed Paper ↗</div>
+      <div id="lastPaperTitle">None yet</div>
+      <div id="lastPaperTime"></div>
+    </div>
+
+    <button id="openHistory">View History</button>
+
+    <div id="credits">
+      Google Scholar Tracker<br />
+      Owned by DongWook Lee
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
