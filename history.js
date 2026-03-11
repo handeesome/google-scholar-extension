@@ -1,5 +1,4 @@
 const loginStatus = document.getElementById("loginStatus");
-const avatar = document.getElementById("avatar");
 
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
@@ -37,19 +36,12 @@ async function checkLoginStatus() {
     logoutBtn.style.display = "inline-block";
 
     syncBtn.disabled = false;
-
-    if (data.notionUser?.avatar_url) {
-      avatar.src = data.notionUser.avatar_url;
-      avatar.style.display = "block";
-    }
   } else {
     loginStatus.textContent = "Not logged in";
     loginStatus.className = "logged-out";
 
     loginBtn.style.display = "inline-block";
     logoutBtn.style.display = "none";
-
-    avatar.style.display = "none";
 
     syncBtn.disabled = true;
   }

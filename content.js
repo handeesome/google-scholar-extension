@@ -89,7 +89,13 @@ function processPage(visitedMap) {
             visited[key].lastVisited = now;
           }
 
-          chrome.storage.local.set({ visitedPapers: visited });
+          chrome.storage.local.set({ visitedPapers: visited }, () => {
+            // Trigger auto-sync to Notion for this paper
+            chrome.runtime.sendMessage({
+              action: "paperVisited",
+              paper: visited[key],
+            });
+          });
           applyHighlight(linkEl, visited[key]);
         });
       });

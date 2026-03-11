@@ -142,6 +142,9 @@ async function autoSync(paper) {
     } else {
       await updatePage(notionToken, paper);
     }
+
+    // Update lastSyncTime so manual sync doesn't re-export auto-synced papers
+    await chrome.storage.local.set({ lastSyncTime: new Date().toISOString() });
   } catch (e) {
     console.error("Auto sync failed", e);
   }
@@ -184,10 +187,38 @@ async function loginToNotion() {
     `&owner=user` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
+  const winWidth = 600;
+  const winHeight = 700;
+
+  // As soon as the auth popup is created, reposition it to center
+  function onWindowCreated(win) {
+    if (win.type !== "popup") return;
+    chrome.windows.onCreated.removeListener(onWindowCreated);
+
+    chrome.system.display.getInfo((displays) => {
+      const primary =
+        (displays && displays.find((d) => d.isPrimary)) || displays?.[0];
+      const screenW = primary?.bounds?.width || 1280;
+      const screenH = primary?.bounds?.height || 800;
+      const screenL = primary?.bounds?.left || 0;
+      const screenT = primary?.bounds?.top || 0;
+
+      chrome.windows.update(win.id, {
+        left: screenL + Math.round((screenW - winWidth) / 2),
+        top: screenT + Math.round((screenH - winHeight) / 2),
+        width: winWidth,
+        height: winHeight,
+      });
+    });
+  }
+
+  chrome.windows.onCreated.addListener(onWindowCreated);
+
   chrome.identity.launchWebAuthFlow(
     { url: authUrl, interactive: true },
     async (redirectedTo) => {
-      // User closed the window or cancelled — stop the spinner
+      chrome.windows.onCreated.removeListener(onWindowCreated);
+
       if (!redirectedTo || chrome.runtime.lastError) {
         chrome.runtime.sendMessage({ action: "loginFailed" });
         return;

@@ -44,6 +44,12 @@
           transform: rotate(360deg);
         }
       }
+
+      button:disabled {
+        background-color: #bdbdbd;
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
     </style>
   </head>
 
@@ -51,8 +57,6 @@
     <h2>Visited Papers</h2>
 
     <div id="notionControls">
-      <img id="avatar" />
-
       <span id="loginStatus" class="logged-out">Not logged in</span>
       <button id="loginBtn">Login</button>
       <button id="logoutBtn">Logout</button>
