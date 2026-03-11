@@ -5,6 +5,7 @@ const DATABASE_ID = "30f1ed958a9980d3ab76cce757b541d4";
 const NOTION_VERSION = "2022-06-28";
 
 let pendingImport = [];
+let pendingExported = 0;
 
 let syncQueue = [];
 let queueRunning = false;
@@ -186,9 +187,18 @@ async function loginToNotion() {
   chrome.identity.launchWebAuthFlow(
     { url: authUrl, interactive: true },
     async (redirectedTo) => {
-      if (!redirectedTo) return;
+      // User closed the window or cancelled — stop the spinner
+      if (!redirectedTo || chrome.runtime.lastError) {
+        chrome.runtime.sendMessage({ action: "loginFailed" });
+        return;
+      }
 
       const code = new URL(redirectedTo).searchParams.get("code");
+
+      if (!code) {
+        chrome.runtime.sendMessage({ action: "loginFailed" });
+        return;
+      }
 
       const basicAuth = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
 
@@ -211,6 +221,11 @@ async function loginToNotion() {
 
       const tokenData = await tokenResponse.json();
       const token = tokenData.access_token;
+
+      if (!token) {
+        chrome.runtime.sendMessage({ action: "loginFailed" });
+        return;
+      }
 
       const userRes = await fetch("https://api.notion.com/v1/users/me", {
         headers: {
@@ -434,6 +449,7 @@ async function bidirectionalSync(localCount) {
   }
 
   pendingImport = importList;
+  pendingExported = exported;
 
   chrome.runtime.sendMessage({
     action: "confirmImport",
@@ -445,16 +461,26 @@ async function bidirectionalSync(localCount) {
 
 async function handleImportConfirmation(confirm) {
   if (!confirm) {
-    finishSync(0, 0);
+    // Don't update lastSyncTime — user cancelled, so next sync should retry
+    chrome.runtime.sendMessage({
+      action: "syncComplete",
+      exported: pendingExported,
+      imported: 0,
+      cancelled: true,
+    });
+
+    pendingImport = [];
+    pendingExported = 0;
 
     return;
   }
 
   await performImport(pendingImport);
 
-  finishSync(0, pendingImport.length);
+  finishSync(pendingExported, pendingImport.length);
 
   pendingImport = [];
+  pendingExported = 0;
 }
 
 async function performImport(importList) {

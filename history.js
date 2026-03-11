@@ -8,6 +8,8 @@ const syncBtn = document.getElementById("syncBtn");
 
 const lastSync = document.getElementById("lastSync");
 
+/* ---------------- BUTTON LOADING ---------------- */
+
 function setLoading(button, loading) {
   if (loading) {
     button.disabled = true;
@@ -22,6 +24,8 @@ function setLoading(button, loading) {
   }
 }
 
+/* ---------------- LOGIN STATUS ---------------- */
+
 async function checkLoginStatus() {
   const data = await chrome.storage.local.get(["notionToken", "notionUser"]);
 
@@ -31,6 +35,8 @@ async function checkLoginStatus() {
 
     loginBtn.style.display = "none";
     logoutBtn.style.display = "inline-block";
+
+    syncBtn.disabled = false;
 
     if (data.notionUser?.avatar_url) {
       avatar.src = data.notionUser.avatar_url;
@@ -44,8 +50,12 @@ async function checkLoginStatus() {
     logoutBtn.style.display = "none";
 
     avatar.style.display = "none";
+
+    syncBtn.disabled = true;
   }
 }
+
+/* ---------------- LAST SYNC ---------------- */
 
 async function loadLastSync() {
   const data = await chrome.storage.local.get("lastSyncTime");
@@ -54,20 +64,30 @@ async function loadLastSync() {
     const formatted = new Date(data.lastSyncTime).toLocaleString();
 
     lastSync.textContent = "Last Sync: " + formatted;
+  } else {
+    lastSync.textContent = "Last Sync: Never";
   }
 }
 
+/* ---------------- LOGIN BUTTON ---------------- */
+
 loginBtn.addEventListener("click", () => {
+  setLoading(loginBtn, true);
+
   chrome.runtime.sendMessage({
     action: "login",
   });
 });
+
+/* ---------------- LOGOUT BUTTON ---------------- */
 
 logoutBtn.addEventListener("click", async () => {
   await chrome.storage.local.remove(["notionToken", "notionUser"]);
 
   checkLoginStatus();
 });
+
+/* ---------------- SYNC BUTTON ---------------- */
 
 syncBtn.addEventListener("click", async () => {
   setLoading(syncBtn, true);
@@ -78,14 +98,23 @@ syncBtn.addEventListener("click", async () => {
 
   chrome.runtime.sendMessage({
     action: "bidirectionalSync",
-
     localCount: Object.keys(localMap).length,
   });
 });
 
+/* ---------------- BACKGROUND MESSAGES ---------------- */
+
 chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.action === "loginSuccess") {
-    checkLoginStatus();
+    setLoading(loginBtn, false);
+
+    await checkLoginStatus();
+  }
+
+  if (msg.action === "loginFailed") {
+    setLoading(loginBtn, false);
+
+    alert("Notion login failed");
   }
 
   if (msg.action === "confirmImport") {
@@ -95,13 +124,18 @@ chrome.runtime.onMessage.addListener(async (msg) => {
 
     chrome.runtime.sendMessage({
       action: "confirmImportResult",
-
       confirm: confirmImport,
     });
   }
 
   if (msg.action === "syncComplete") {
     setLoading(syncBtn, false);
+
+    if (msg.cancelled) {
+      // User declined the import — don't update lastSyncTime so next sync retries
+      loadHistory();
+      return;
+    }
 
     const now = new Date().toISOString();
 
@@ -114,7 +148,7 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     if (msg.imported || msg.exported) {
       alert(
         `Sync complete\n` +
-          `Exported: ${msg.exported}\n` +
+          `Exported or Updated: ${msg.exported}\n` +
           `Imported: ${msg.imported}`,
       );
     } else {
@@ -124,6 +158,8 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     loadHistory();
   }
 });
+
+/* ---------------- HISTORY TABLE ---------------- */
 
 function loadHistory() {
   chrome.storage.local.get(["visitedPapers"], (data) => {
@@ -166,6 +202,8 @@ function loadHistory() {
   });
 }
 
+/* ---------------- DELETE SELECTED ---------------- */
+
 document.getElementById("deleteSelected").addEventListener("click", () => {
   chrome.storage.local.get(["visitedPapers"], (data) => {
     const map = data.visitedPapers || {};
@@ -176,6 +214,7 @@ document.getElementById("deleteSelected").addEventListener("click", () => {
 
     if (checkboxes.length === 0) {
       alert("Select at least one article.");
+
       return;
     }
 
@@ -193,12 +232,15 @@ document.getElementById("deleteSelected").addEventListener("click", () => {
   });
 });
 
+/* ---------------- CLEAR ALL ---------------- */
+
 document.getElementById("clearAll").addEventListener("click", () => {
   chrome.storage.local.get(["visitedPapers"], (data) => {
     const count = Object.keys(data.visitedPapers || {}).length;
 
     if (count === 0) {
       alert("No articles to delete.");
+
       return;
     }
 
@@ -209,6 +251,8 @@ document.getElementById("clearAll").addEventListener("click", () => {
     chrome.storage.local.set({ visitedPapers: {} }, loadHistory);
   });
 });
+
+/* ---------------- LINK CLICK UPDATE ---------------- */
 
 document.addEventListener("click", (event) => {
   const link = event.target.closest("a[target='_blank']");
@@ -231,6 +275,8 @@ document.addEventListener("click", (event) => {
     chrome.storage.local.set({ visitedPapers: map }, loadHistory);
   });
 });
+
+/* ---------------- INIT ---------------- */
 
 checkLoginStatus();
 loadLastSync();

@@ -3,8 +3,25 @@
 function normalizeUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
-    url.search = "";
-    return url.toString();
+
+    // Handle scholar redirect
+    if (url.hostname.includes("scholar.google")) {
+      const actual = url.searchParams.get("url");
+      if (actual) return normalizeUrl(actual);
+    }
+
+    const keepParams = ["id", "doi", "arxiv", "pmid"];
+
+    const params = url.searchParams;
+    const newParams = new URLSearchParams();
+
+    for (const key of keepParams) {
+      if (params.has(key)) newParams.set(key, params.get(key));
+    }
+
+    url.search = newParams.toString();
+
+    return url.origin + url.pathname + (url.search ? "?" + url.search : "");
   } catch {
     return rawUrl;
   }
