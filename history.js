@@ -7,7 +7,7 @@ const logoutBtn = document.getElementById("logoutBtn");
 const syncBtn = document.getElementById("syncBtn");
 const lastSync = document.getElementById("lastSync");
 
-/* ---------------- BUTTON LOADING FIX ---------------- */
+/* ---------------- BUTTON LOADING ---------------- */
 function setLoading(button, loading) {
   if (!button) return;
   if (loading) {
@@ -50,23 +50,9 @@ async function refreshUI() {
   }
 }
 
-/* ---------------- ACTION: SYNC (The "Everything" Button) ---------------- */
-syncBtn.addEventListener("click", async () => {
-  setLoading(syncBtn, true);
-
-  // Get current local count to tell background.js if we need to "Import" (Restore)
-  const data = await chrome.storage.local.get("visitedPapers");
-  const localCount = Object.keys(data.visitedPapers || {}).length;
-
-  // background.js bidirectionalSync handles:
-  // 1. Pushing new local papers to Notion
-  // 2. Pulling papers from Notion that are missing locally
-  chrome.runtime.sendMessage({ action: "bidirectionalSync", localCount });
-});
-
 /* ---------------- ACTION: DELETE & CLEAR ---------------- */
 
-// Delete Selected
+// DELETE SELECTED: Removes from Local and Notion
 document
   .getElementById("deleteSelected")
   .addEventListener("click", async () => {
@@ -75,28 +61,61 @@ document
     );
     if (checkboxes.length === 0) return;
 
-    if (!confirm(`Delete ${checkboxes.length} selected items?`)) return;
+    const confirmMsg =
+      checkboxes.length === 1
+        ? "Delete this paper from history and Notion?"
+        : `Delete ${checkboxes.length} papers from history and Notion?`;
+
+    if (!confirm(confirmMsg)) return;
 
     const data = await chrome.storage.local.get("visitedPapers");
     const visited = data.visitedPapers || {};
 
     checkboxes.forEach((cb) => {
       const url = decodeURIComponent(cb.dataset.url);
-      // Notify background.js to delete from Notion
+
+      // 1. Tell background.js to delete the page from Notion
       chrome.runtime.sendMessage({ action: "deletePaper", url: url });
+
+      // 2. Remove from local storage map
       delete visited[url];
     });
 
+    // 3. Save updated local storage
     await chrome.storage.local.set({ visitedPapers: visited });
+
+    // 4. Refresh table
     loadHistory();
   });
 
-// Clear All
+// CLEAR ALL: Requires Logout first
 document.getElementById("clearAll").addEventListener("click", async () => {
-  if (!confirm("Clear all local history? (This won't delete your Notion data)"))
+  const data = await chrome.storage.local.get(["notionToken"]);
+
+  // Requirement: User must log out first
+  if (data.notionToken) {
+    alert(
+      "Please Log Out from Notion before clearing all history to prevent data conflicts.",
+    );
     return;
-  await chrome.storage.local.set({ visitedPapers: {} });
-  loadHistory();
+  }
+
+  if (
+    confirm(
+      "Are you sure you want to clear ALL local history? This cannot be undone.",
+    )
+  ) {
+    await chrome.storage.local.set({ visitedPapers: {} });
+    loadHistory();
+  }
+});
+
+/* ---------------- ACTION: SYNC ---------------- */
+syncBtn.addEventListener("click", async () => {
+  setLoading(syncBtn, true);
+  const data = await chrome.storage.local.get("visitedPapers");
+  const localCount = Object.keys(data.visitedPapers || {}).length;
+  chrome.runtime.sendMessage({ action: "bidirectionalSync", localCount });
 });
 
 /* ---------------- AUTH LISTENERS ---------------- */
@@ -122,9 +141,24 @@ chrome.runtime.onMessage.addListener((msg) => {
     refreshUI();
     if (msg.action === "syncComplete") loadHistory();
   }
+  // Handle Login Failure
+  if (msg.action === "loginFailed") {
+    setLoading(loginBtn, false); // Stop the spinner
+    alert(
+      "Login Failed: The authentication window was closed or the connection was interrupted.",
+    );
+    return;
+  }
+
+  // Existing Success/Sync handlers
+  if (msg.action === "loginSuccess" || msg.action === "syncComplete") {
+    setLoading(loginBtn, false);
+    setLoading(syncBtn, false);
+    refreshUI();
+    if (msg.action === "syncComplete") loadHistory();
+  }
 
   if (msg.action === "confirmImport") {
-    // This happens if Sync finds papers in Notion you don't have locally
     if (
       confirm(
         `Found ${msg.count} papers in Notion. Import them to your local history?`,
@@ -167,7 +201,6 @@ function loadHistory() {
   });
 }
 
-/* ---------------- INITIALIZE ---------------- */
 document.addEventListener("DOMContentLoaded", () => {
   refreshUI();
   loadHistory();

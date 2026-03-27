@@ -209,26 +209,63 @@ async function autoSync(paper) {
 async function deleteNotionPage(url) {
   const storage = await chrome.storage.local.get([
     "notionToken",
+    "databaseId",
     "visitedPapers",
   ]);
-
   const paper = storage.visitedPapers?.[url];
 
-  if (!paper || !paper.notionPageId) return;
+  if (!storage.notionToken || !storage.databaseId) return;
 
-  await fetch(`https://api.notion.com/v1/pages/${paper.notionPageId}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${storage.notionToken}`,
-      "Notion-Version": NOTION_VERSION,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      archived: true,
-    }),
-  });
+  // If we don't have the ID locally, try to find it in Notion by URL first
+  let pageId = paper?.notionPageId;
+
+  if (!pageId) {
+    console.log("No local Page ID, searching Notion for URL:", url);
+    try {
+      const searchRes = await fetch(
+        `https://api.notion.com/v1/databases/${storage.databaseId}/query`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${storage.notionToken}`,
+            "Notion-Version": NOTION_VERSION,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            filter: { property: "URL", url: { equals: url } },
+          }),
+        },
+      );
+      const searchData = await searchRes.json();
+      if (searchData.results?.length > 0) {
+        pageId = searchData.results[0].id;
+      }
+    } catch (e) {
+      console.error("Search failed:", e);
+    }
+  }
+
+  if (!pageId) {
+    console.warn("Delete failed: This paper does not exist in Notion.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`https://api.notion.com/v1/pages/${pageId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${storage.notionToken}`,
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ archived: true }),
+    });
+
+    if (res.ok) console.log("Successfully deleted from Notion:", url);
+  } catch (err) {
+    console.error("Failed to delete from Notion:", err);
+  }
 }
-
 /* ---------------- LOGIN ---------------- */
 
 async function loginToNotion() {
@@ -274,7 +311,12 @@ async function loginToNotion() {
       chrome.windows.onCreated.removeListener(onWindowCreated);
 
       if (!redirectedTo || chrome.runtime.lastError) {
-        chrome.runtime.sendMessage({ action: "loginFailed" });
+        chrome.runtime.sendMessage({
+          action: "loginFailed",
+          reason: chrome.runtime.lastError
+            ? "Window closed or timed out"
+            : "Unknown error",
+        });
         console.log("Auth flow error:", chrome.runtime.lastError);
         return;
       }
