@@ -148,6 +148,12 @@ chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.action === "loginSuccess") {
     setLoading(loginBtn, false);
 
+    if (msg.databaseId) {
+      // Database was auto-detected — no manual input needed
+      syncBtn.disabled = false;
+      alert("Connected! Your Notion database can sync NOW.");
+    }
+    // checkLoginStatus will call promptDatabaseId() if databaseId is still missing
     await checkLoginStatus();
   }
 
@@ -320,54 +326,6 @@ document.addEventListener("click", (event) => {
     chrome.storage.local.set({ visitedPapers: map }, loadHistory);
   });
 });
-
-/* ---------------- TUTORIAL ---------------- */
-
-(function () {
-  const overlay = document.getElementById("tutorialOverlay");
-  const slides = document.querySelectorAll(".tutorial-slide");
-  const dots = document.querySelectorAll(".dot");
-  const prevBtn = document.getElementById("tutorialPrev");
-  const nextBtn = document.getElementById("tutorialNext");
-  let current = 1;
-  const total = slides.length;
-
-  function goTo(n) {
-    slides[current - 1].classList.remove("active");
-    dots[current - 1].classList.remove("active");
-    current = n;
-    slides[current - 1].classList.add("active");
-    dots[current - 1].classList.add("active");
-    prevBtn.disabled = current === 1;
-    nextBtn.textContent = current === total ? "Done ✓" : "Next →";
-  }
-
-  document.getElementById("tutorialBtn").addEventListener("click", () => {
-    goTo(1);
-    overlay.classList.add("open");
-  });
-
-  document.getElementById("tutorialClose").addEventListener("click", () => {
-    overlay.classList.remove("open");
-  });
-
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) overlay.classList.remove("open");
-  });
-
-  prevBtn.addEventListener("click", () => {
-    if (current > 1) goTo(current - 1);
-  });
-
-  nextBtn.addEventListener("click", () => {
-    if (current < total) goTo(current + 1);
-    else overlay.classList.remove("open");
-  });
-
-  dots.forEach((dot) => {
-    dot.addEventListener("click", () => goTo(parseInt(dot.dataset.index)));
-  });
-})();
 
 /* ---------------- INIT ---------------- */
 

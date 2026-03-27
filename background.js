@@ -275,6 +275,7 @@ async function loginToNotion() {
 
       if (!redirectedTo || chrome.runtime.lastError) {
         chrome.runtime.sendMessage({ action: "loginFailed" });
+        console.log("Auth flow error:", chrome.runtime.lastError);
         return;
       }
 
@@ -282,6 +283,7 @@ async function loginToNotion() {
 
       if (!code) {
         chrome.runtime.sendMessage({ action: "loginFailed" });
+        console.log("No code found in redirect URL:", redirectedTo);
         return;
       }
 
@@ -297,6 +299,10 @@ async function loginToNotion() {
 
       if (!token) {
         chrome.runtime.sendMessage({ action: "loginFailed" });
+        console.log(
+          "Token exchange failed:",
+          JSON.stringify(tokenData, null, 2),
+        );
         return;
       }
 
@@ -314,9 +320,67 @@ async function loginToNotion() {
         notionUser: userData,
       });
 
-      chrome.runtime.sendMessage({ action: "loginSuccess" });
+      // Auto-detect the database the user granted access to
+      const databaseId = await detectGrantedDatabase(token);
+
+      if (databaseId) {
+        await chrome.storage.local.set({ databaseId });
+        chrome.runtime.sendMessage({ action: "loginSuccess", databaseId });
+      } else {
+        // Fallback: couldn't auto-detect, ask user manually
+        chrome.runtime.sendMessage({
+          action: "loginSuccess",
+          databaseId: null,
+        });
+      }
     },
   );
+}
+
+/* ---------------- AUTO DETECT DATABASE ---------------- */
+
+async function detectGrantedDatabase(token) {
+  try {
+    // Search for all databases the integration has access to
+    const res = await fetch("https://api.notion.com/v1/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+      },
+      body: JSON.stringify({
+        filter: { value: "database", property: "object" },
+        page_size: 10,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data.results?.length) {
+      console.warn("No databases found after OAuth:", data);
+      return null;
+    }
+
+    if (data.results.length === 1) {
+      // Exactly one database — use it automatically
+      const db = data.results[0];
+      console.log("Auto-detected database:", db.id, db.title?.[0]?.plain_text);
+      return db.id.replace(/-/g, "");
+    }
+
+    // Multiple databases — pick the most recently edited one
+    // (most likely the one they just created or connected)
+    const sorted = data.results.sort(
+      (a, b) => new Date(b.last_edited_time) - new Date(a.last_edited_time),
+    );
+    const db = sorted[0];
+    console.log("Multiple databases found, using most recent:", db.id);
+    return db.id.replace(/-/g, "");
+  } catch (e) {
+    console.error("detectGrantedDatabase failed:", e);
+    return null;
+  }
 }
 
 /* ---------------- DATABASE QUERY ---------------- */

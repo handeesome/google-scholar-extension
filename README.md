@@ -6,19 +6,17 @@ A Chrome extension for researchers who want to keep track of the academic papers
 
 ## Why I Built This
 
-If you do a lot of literature reviews, you've probably opened the same paper twice without realizing it. This extension solves that by highlighting papers you've already visited directly in your Google Scholar search results, so you always know what you've read, how many times, and when.
+If you do a lot of literature reviews, you've probably opened the same paper twice without realizing it. This extension highlights papers you've already visited directly in your Google Scholar search results, so you always know what you've read, how many times, and when.
 
 ---
 
 ## What It Does
 
-- **Highlights visited papers** on Google Scholar search results — yellow for papers visited fewer than 5 times, red for 5 or more
-- **Shows visit count and last visited date** inline next to each result
-- **Tracks automatically** — no buttons to click, just browse Scholar as usual
-- **Syncs to your Notion database** — every paper you click is pushed to Notion in the background
-- **Bidirectional sync** — pull papers from Notion back into the extension too
-- **Full history page** — browse and delete your visited papers in one place
-- **Works for a group** — each user connects their own Notion database, so everyone tracks independently
+- **Highlights visited papers** on Google Scholar search results.
+- **Shows visit count and last visited date** inline next to each result.
+- **Tracks automatically** — no buttons to click, just browse Scholar as usual.
+- **Syncs to Notion** — every paper you click is pushed to your database in the background.
+- **Zero Configuration** — the extension automatically finds your database and sets up the columns.
 
 ---
 
@@ -26,49 +24,48 @@ If you do a lot of literature reviews, you've probably opened the same paper twi
 
 This extension is not on the Chrome Web Store, so you'll need to load it manually:
 
-1. Download or clone this repository
-2. Go to `chrome://extensions` in Chrome
-3. Enable **Developer mode** (toggle in the top right)
-4. Click **Load unpacked** and select the project folder
-5. The extension icon will appear in your toolbar
+1. Download or clone this repository.
+2. Go to `chrome://extensions` in Chrome.
+3. Enable **Developer mode** (toggle in the top right).
+4. Click **Load unpacked** and select the project folder.
 
 ---
 
 ## How to Link to Notion
 
-Click the **❓ How to Link Notion** button in the History page for a visual step-by-step guide. Here's a summary:
+Setting up the sync is now entirely automated. You don't need to copy-paste any IDs.
 
-### 1. Create a Notion database
+### 1. Log In
 
-Create a new page in Notion and add a **Database** to it. Choose **Empty database**.
+Click **Login** in the extension history page. This will open the secure Notion authorization window.
 
-### 2. Share it with the integration
+### 2. Choose Your Database
 
-Open your database → click `•••` in the top right → **Connections** → search for **Google Scholar Tracker** and connect it.
+You will be asked to select which pages or databases the extension can access. You have two options:
 
-### 3. Log in
+- **Option A: Use the Template (Recommended)**
+  Choose to **"Duplicate Template"** if prompted. The extension will automatically find this new database and link to it.
+- **Option B: Use Your Own Database**
+  Search for and select an existing database in your workspace.
+  _Note: Please ensure you select the **Database** itself, rather than just the parent Page it lives on._
 
-Click **Login** in the History page and authorize with your Notion account.
+### 3. Automatic Setup
 
-### 4. Enter your Database ID
+After you click **Allow Access**, the window will close and the extension will handle the rest:
 
-When prompted, paste your Database ID. You can find it in your database's URL:
+- It searches your authorized pages for the database.
+- It automatically creates the required columns (`Visit Count`, `URL`, `Last Visited`, etc.) if they are missing.
+- It saves your connection settings instantly.
 
-```
-notion.so/your-name/[DATABASE_ID]?v=...
-```
+### 4. Sync
 
-It's the 32-character string before the `?v=`. The extension will automatically set up all required columns on first sync.
-
-### 5. Sync
-
-Click **Sync** — your visited papers will appear in your Notion database. From now on, papers are pushed to Notion automatically every time you click one on Google Scholar.
+Click **Sync** — your history will appear in Notion. From now on, any paper you click on Google Scholar will sync to Notion in real-time.
 
 ---
 
 ## Notion Database Columns
 
-The extension creates these columns automatically on first sync:
+The extension manages these columns for you:
 
 | Column          | Type   |
 | --------------- | ------ |
@@ -83,19 +80,11 @@ The extension creates these columns automatically on first sync:
 
 ## For Developers
 
-The client secret is not stored in this repository. It lives in a Cloudflare Worker that proxies the Notion OAuth token exchange. To self-host:
+The client secret is protected by a Cloudflare Worker proxy. To self-host:
 
-1. Create a [Notion integration](https://www.notion.so/my-integrations) and copy the Client ID and Client Secret
-2. Deploy `cloudflare-worker.js` to Cloudflare Workers and add `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` as environment variables
-3. Set `CLIENT_ID` and `WORKER_URL` at the top of `background.js`
-
----
-
-## Tech Stack
-
-- Chrome Extension (Manifest V3)
-- Notion API (REST, v2022-06-28)
-- Cloudflare Workers (OAuth proxy)
+1. Create a [Notion integration](https://www.notion.so/my-integrations) (Public integration).
+2. Deploy `cloudflare-worker.js` to Cloudflare Workers with `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` environment variables.
+3. Update `WORKER_URL` in `background.js`.
 
 ---
 
